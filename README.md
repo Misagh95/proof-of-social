@@ -22,7 +22,9 @@ An Intelligent Contract on GenLayer that verifies Twitter identity using AI cons
 
 ## Deployed on Bradbury
 
-`0xAD3047dB9aAE82F8d66927F22681Ea46eD7313ab`
+`0x7A676bbefe0CFEfAdA20c91712d5C42f63821B4A`
+
+Explorer: https://explorer-bradbury.genlayer.com/address/0x7A676bbefe0CFEfAdA20c91712d5C42f63821B4A
 
 ## Methods
 
