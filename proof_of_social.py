@@ -23,7 +23,7 @@ class SocialIdentity(gl.Contract):
         self.next_id = u256(1)
 
     @gl.public.write
-    def request(self):
+    def request(self) -> str:
         pid = self.next_id
         self.requests[pid] = Verification(
             owner=gl.message.sender_address,
@@ -37,6 +37,20 @@ class SocialIdentity(gl.Contract):
         existing.append(pid)
         self.user_requests[gl.message.sender_address] = existing
         self.next_id += u256(1)
+        return str(int(pid))
+
+    @gl.public.write
+    def submitData(self, request_id: u256, handle: str, tweet_url: str, wallet: str):
+        r = self.requests.get(request_id)
+        if r is None:
+            raise UserError("not found")
+        if r.owner != gl.message.sender_address:
+            raise UserError("not your request")
+        if r.status != u256(0):
+            raise UserError("already processed")
+        if not handle or not tweet_url or not wallet:
+            raise UserError("missing fields")
+        self.request_data[request_id] = handle + "|" + tweet_url + "|" + wallet
 
     @gl.public.write
     def verify(self, request_id: u256):
@@ -50,7 +64,7 @@ class SocialIdentity(gl.Contract):
 
         data_raw = gl.storage.copy_to_memory(self.request_data[request_id])
         if not data_raw:
-            raise UserError("no data")
+            raise UserError("no data submitted")
 
         parts = data_raw.split("|")
         if len(parts) < 3:
@@ -66,7 +80,14 @@ class SocialIdentity(gl.Contract):
         def validate_tweet(leader_res):
             if not isinstance(leader_res, gl.vm.Return):
                 return False
-            return True
+            try:
+                mine = fetch_tweet()
+                leader = leader_res.calldata
+                if not isinstance(mine, str) or not isinstance(leader, str):
+                    return False
+                return len(mine) > 0 and len(leader) > 0
+            except Exception:
+                return False
 
         content = gl.vm.run_nondet_unsafe(fetch_tweet, validate_tweet)
         if content is None:
@@ -78,15 +99,20 @@ class SocialIdentity(gl.Contract):
             f"You are verifying social identity.\n"
             f"User claims wallet: {wallet}\n"
             f"Twitter handle: @{handle}\n"
+            f"Tweet URL: {tweet_url}\n"
             f"Tweet content: {content}\n"
-            f'Return JSON: {{"contains_wallet":bool,"match":bool}}'
+            f"Your task: confirm that the tweet body actually contains the wallet address {wallet} "
+            f"and was authored by @{handle}. "
+            f'Return JSON: {{"contains_wallet":bool,"match":bool,"reason":str}}'
         )
 
         def evaluate():
             return gl.nondet.exec_prompt(prompt)
 
         decision = gl.eq_principle.prompt_comparative(
-            evaluate, "Validators must agree on wallet verification"
+            evaluate,
+            "Validators must agree on whether the tweet genuinely contains the claimed wallet "
+            "address and belongs to the claimed handle. Reject if uncertain."
         )
 
         try:
@@ -103,7 +129,17 @@ class SocialIdentity(gl.Contract):
         except Exception:
             r.status = u256(2)
 
-        r.timestamp = u256(int(__import__("time").time()))
+        def now_ts() -> str:
+            raw = gl.nondet.web.render("https://worldtimeapi.org/api/timezone/Etc/UTC", mode="text")
+            if raw is None or raw.strip() == "" or raw.strip() == "null":
+                return "0"
+            try:
+                j = json.loads(raw)
+                return str(round(int(j["unixtime"]) / 60) * 60)
+            except Exception:
+                return "0"
+
+        r.timestamp = u256(int(gl.eq_principle.strict_eq(now_ts)))
         self.requests[request_id] = r
 
     @gl.public.view
